@@ -1,0 +1,13 @@
+bucket,db,operation,mean_latency_s,median_latency_s,std_latency_s,mean_throughput,filesize_mb,n
+audio_small,mongodb,read,0.00421,0.00362,0.00247,96.33707,0.39067,110
+audio_small,mongodb,write,0.00658,0.00631,0.00229,58.89512,0.39067,110
+audio_small,postgres,read,0.00581,0.00559,0.00253,64.81965,0.39067,110
+audio_small,postgres,write,0.01751,0.01417,0.01839,25.23221,0.39067,110
+video_large,mongodb,read,0.0403,0.03857,0.00971,152.46964,5.91468,100
+video_large,mongodb,write,0.05114,0.0501,0.00766,117.45652,5.91468,100
+video_large,postgres,read,0.09459,0.0791,0.10547,72.43861,5.91468,100
+video_large,postgres,write,0.2491,0.22486,0.10291,25.40388,5.91468,100
+video_medium,mongodb,read,0.01064,0.01058,0.00407,122.08824,1.37178,110
+video_medium,mongodb,write,0.01478,0.01522,0.00473,88.70445,1.37178,110
+video_medium,postgres,read,0.02017,0.0194,0.00942,65.47114,1.37178,110
+video_medium,postgres,write,0.05635,0.04942,0.03405,24.62311,1.37178,110
