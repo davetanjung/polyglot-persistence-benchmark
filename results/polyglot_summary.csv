@@ -1,0 +1,7 @@
+phase,query_type,approach,mean,median,std,n
+query,end_to_end,polyglot,0.1246,0.09742,0.1118,40
+query,end_to_end,pure_mongo,1.93425,1.37362,1.79933,40
+query,metadata_only,polyglot_pg,0.00133,0.0005,0.00195,40
+query,metadata_only,pure_mongo,0.00131,0.00091,0.00172,40
+write,write,polyglot,0.03553,0.01452,0.12314,300
+write,write,pure_mongo,0.02737,0.01327,0.02652,300
