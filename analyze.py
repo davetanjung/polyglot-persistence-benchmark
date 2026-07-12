@@ -18,17 +18,49 @@ except ImportError:
 RESULTS_FILE  = Path("results/raw_results.csv")
 SUMMARY_FILE  = Path("results/summary.csv")
 
+EXPECTED_COLUMNS = {
+    "bucket", "stored_name", "filesize_bytes",
+    "db", "operation", "rep", "elapsed_seconds",
+}
+
+
+def assert_same_row_counts(frame):
+    counts = (
+        frame.groupby(["bucket", "operation", "db"])
+        .size()
+        .unstack("db")
+    )
+
+    required = {"postgres", "mongodb"}
+    missing = required - set(counts.columns)
+    if missing:
+        sys.exit(f"[ERROR] Missing DB measurements: {sorted(missing)}")
+
+    mismatched = counts[counts["postgres"] != counts["mongodb"]]
+    if not mismatched.empty:
+        print("[ERROR] Unfair comparison: row counts differ")
+        print(mismatched[["postgres", "mongodb"]].to_string())
+        sys.exit("Regenerate results with client.py before using this summary.")
+
+
 # Load raw result csv
 if not RESULTS_FILE.exists():
     sys.exit(f"[ERROR] {RESULTS_FILE} not found. Run client.py first.")
 
 df = pd.read_csv(RESULTS_FILE)
+missing = EXPECTED_COLUMNS - set(df.columns)
+if missing:
+    sys.exit(f"[ERROR] Missing columns in {RESULTS_FILE}: {sorted(missing)}")
 
-# Sanity check: warn if any bucket/db/op combo has fewer rows than expected
+df["elapsed_seconds"] = pd.to_numeric(df["elapsed_seconds"], errors="coerce")
+df["filesize_bytes"] = pd.to_numeric(df["filesize_bytes"], errors="coerce")
+
+# Sanity check: fail if any bucket/db/op combo is not comparable.
 print("── Row counts per group ──")
 counts = df.groupby(["bucket", "db", "operation"]).size().rename("n")
 print(counts.to_string())
 print()
+assert_same_row_counts(df)
 
 # ── Derived columns ───────────────────────────────────────────────────────────
 

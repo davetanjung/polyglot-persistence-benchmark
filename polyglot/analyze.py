@@ -21,7 +21,8 @@ SUMMARY_FILE = Path("../results/polyglot_summary.csv")
 
 EXPECTED_COLUMNS = {
     "phase", "query_type", "actor", "emotion", "bucket",
-    "approach", "elapsed_seconds", "n_files",
+    "approach", "rep", "stored_name", "filesize_bytes",
+    "elapsed_seconds", "n_files", "checksum_ok",
 }
 
 
@@ -85,11 +86,22 @@ if missing:
 
 df["elapsed_seconds"] = pd.to_numeric(df["elapsed_seconds"], errors="coerce")
 df["n_files"] = pd.to_numeric(df["n_files"], errors="coerce")
+df["rep"] = pd.to_numeric(df["rep"], errors="coerce")
+df["filesize_bytes"] = pd.to_numeric(df["filesize_bytes"], errors="coerce")
 df.loc[df["query_type"] == "metadata_only", "phase"] = "query"
 df.loc[df["query_type"] == "end_to_end", "phase"] = "read"
 
 assert_same_file_counts(df, "query", "polyglot_pg", "pure_mongo")
 assert_same_file_counts(df, "read", "polyglot", "pure_mongo")
+
+checksum_values = df.loc[df["phase"] == "read", "checksum_ok"].dropna()
+if not checksum_values.empty:
+    checksum_ok = checksum_values.astype(str).str.lower().isin(["true", "1"])
+    if not checksum_ok.all():
+        bad = df[(df["phase"] == "read") & (df["checksum_ok"].astype(str).str.lower() != "true")]
+        print("\n[ERROR] Checksum mismatch found in read results")
+        print(bad[["actor", "emotion", "approach", "rep", "n_files"]].to_string(index=False))
+        sys.exit("Do not use these results until checksum mismatches are resolved.")
 
 print(f"Total rows: {len(df)}")
 print(f"Approaches: {df['approach'].unique()}")
@@ -112,6 +124,28 @@ print("\nRows per bucket/approach:")
 print(write_counts.to_string())
 print()
 print(write_summary.to_string())
+
+video_medium_polyglot = writes[
+    (writes["bucket"] == "video_medium") & (writes["approach"] == "polyglot")
+]
+if not video_medium_polyglot.empty:
+    print("\nTop slowest video_medium polyglot writes:")
+    print(
+        video_medium_polyglot.nlargest(10, "elapsed_seconds")[
+            ["bucket", "approach", "rep", "stored_name", "filesize_bytes", "elapsed_seconds"]
+        ].to_string(index=False)
+    )
+
+video_medium_mongo = writes[
+    (writes["bucket"] == "video_medium") & (writes["approach"] == "pure_mongo")
+]
+if not video_medium_mongo.empty:
+    print("\nTop slowest video_medium pure_mongo writes:")
+    print(
+        video_medium_mongo.nlargest(10, "elapsed_seconds")[
+            ["bucket", "approach", "rep", "stored_name", "filesize_bytes", "elapsed_seconds"]
+        ].to_string(index=False)
+    )
 
 # ── 2. Query latency ──────────────────────────────────────────────────────────
 
