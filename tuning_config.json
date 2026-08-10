@@ -1,0 +1,7 @@
+{
+    "chunk_size_bytes": 1048576,
+    "shared_buffers": "512MB",
+    "work_mem": "64MB",
+    "maintenance_work_mem": "256MB",
+    "random_page_cost": "4.0"
+}

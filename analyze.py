@@ -29,6 +29,7 @@ df = pd.read_csv(RESULTS_FILE)
 # Data conversions
 df["elapsed_seconds"] = pd.to_numeric(df["elapsed_seconds"], errors="coerce")
 df["filesize_bytes"] = pd.to_numeric(df["filesize_bytes"], errors="coerce")
+df["bucket"] = df["bucket"].fillna("ALL")
 
 # 1. Summary Statistics
 summary = df.groupby(["phase", "bucket", "approach"])["elapsed_seconds"].agg(
@@ -89,9 +90,9 @@ for phase in df["phase"].unique():
                     "bucket": bucket,
                     "approach_1": app1,
                     "approach_2": app2,
-                    "mann_whitney_p": round(p_m, 5) if not np.isnan(p_m) else None,
-                    "wilcoxon_p": round(p_w, 5) if not np.isnan(p_w) else None,
-                    "cohens_d": round(d_val, 5) if not np.isnan(d_val) else None
+                    "mann_whitney_p": p_m if not np.isnan(p_m) else None,
+                    "wilcoxon_p": p_w if not np.isnan(p_w) else None,
+                    "cohens_d": d_val if not np.isnan(d_val) else None
                 })
 
 if stats_results:

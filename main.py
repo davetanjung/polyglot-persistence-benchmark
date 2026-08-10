@@ -12,6 +12,7 @@ RAVDESS filename convention:
 """
 
 import csv
+import json
 import hashlib
 import random
 import re
@@ -47,6 +48,16 @@ MONGO_URI = "mongodb://localhost:27018/"
 
 GRIDFS_CHUNK_SIZE_BYTES = 261120
 
+TUNING_CONFIG_FILE = Path("tuning_config.json")
+if TUNING_CONFIG_FILE.exists():
+    try:
+        with open(TUNING_CONFIG_FILE, "r") as f:
+            tuning_config = json.load(f)
+            GRIDFS_CHUNK_SIZE_BYTES = tuning_config.get("chunk_size_bytes", GRIDFS_CHUNK_SIZE_BYTES)
+            print(f"[INFO] Loaded tuning_config.json: chunk_size_bytes={GRIDFS_CHUNK_SIZE_BYTES}")
+    except Exception as e:
+        print(f"[WARN] Failed to load tuning_config.json: {e}")
+
 RAVDESS_KEYS = [
     "modality", "channel", "emotion", "intensity",
     "statement", "repetition", "actor",
@@ -58,7 +69,7 @@ def connect():
     pg = psycopg2.connect(PG_DSN, keepalives=1, keepalives_idle=30)
     mongo = pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
     mongo.admin.command("ping")
-    db = mongo["mediadb"]
+    db = mongo.get_database("mediadb")
     fs = gridfs.GridFS(db)
     return pg, fs, db
 

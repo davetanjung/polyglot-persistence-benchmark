@@ -1,0 +1,42 @@
+Setting up PostgreSQL tables (if needed)...
+Resetting benchmark storage...
+Collecting files...
+  audio_small: 10 valid files
+  audio_medium: 10 valid files
+  video_small: 10 valid files
+  video_medium: 10 valid files
+
+── Warm-up (5 ops per bucket) ──
+  Warm-up done. Pausing 30s before Phase 1...
+
+── Phase 1: Writes (40 files x 10 reps) ──
+  Rep 1/10 done
+  Rep 2/10 done
+  Rep 3/10 done
+  Rep 4/10 done
+  Rep 5/10 done
+  Rep 6/10 done
+  Rep 7/10 done
+  Rep 8/10 done
+  Rep 9/10 done
+  Rep 10/10 done
+
+── Phase 2: Metadata Queries (10 pairs x 10 reps) ──
+  Query rep 1/10 done
+  Query rep 2/10 done
+  Query rep 3/10 done
+  Query rep 4/10 done
+  Query rep 5/10 done
+  Query rep 6/10 done
+  Query rep 7/10 done
+  Query rep 8/10 done
+  Query rep 9/10 done
+  Query rep 10/10 done
+
+── Phase 3: End-to-End Retrieval (10 pairs x 10 reps) ──
+  Read rep 1/10 done
+  Read rep 2/10 done
+  Read rep 3/10 done
+  Read rep 4/10 done
+  Read rep 5/10 done
+  Read rep 6/10 done
