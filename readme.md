@@ -1,231 +1,95 @@
-# Multimedia Database Benchmark
+# Multimedia Database Benchmark (Polyglot Persistence)
 
-Benchmark project for comparing PostgreSQL and MongoDB storage patterns for
-audio/video files.
+Benchmark project for comparing PostgreSQL and MongoDB storage patterns for audio/video files.
 
-- **Experiment 1:** PostgreSQL `BYTEA` vs MongoDB GridFS
-- **Experiment 2:** Polyglot persistence, with PostgreSQL metadata and MongoDB
-  GridFS binary storage, compared against pure MongoDB GridFS with embedded
-  metadata
+## 1. Goal of the Experiment
+The primary goal of this research is to empirically benchmark three different database storage strategies for handling multimedia files (Audio and Video) and their associated metadata:
+1. **Pure PostgreSQL (`pg_bytea`)**: Storing both metadata and binary files in PostgreSQL using the `BYTEA` column.
+2. **Pure MongoDB (`mongo_gridfs`)**: Storing both binary files and metadata in MongoDB GridFS using embedded document fields.
+3. **Polyglot Persistence (`polyglot`)**: A hybrid architecture using PostgreSQL for structured metadata (B-tree indexing) and MongoDB GridFS for heavy binary multimedia content, optimized with parallel writes.
 
-Dataset files are based on RAVDESS-style audio/video naming where available.
-The `10-17mb` video folder contains filenames without metadata, so
-`polyglot/client.py` generates deterministic metadata for that bucket.
+## 2. Optimizations Implemented
+- **Parallel Writes (Concurrency)**: The Polyglot strategy uses `concurrent.futures.ThreadPoolExecutor` to simultaneously write to MongoDB GridFS and PostgreSQL, eliminating the theoretical "double-write" penalty.
+- **Machine Learning Database Tuning (Optuna)**: Hyperparameters like MongoDB `chunk_size_bytes` and PostgreSQL memory settings (`shared_buffers`, `work_mem`) are optimized via Optuna to find the absolute best combination of memory and storage parameters before running the benchmark.
 
----
-
-## Project Structure
+## 3. Project Structure
 
 ```text
 experiment/
 ├── docker-compose.yaml              # PostgreSQL 16 and MongoDB 7 services
-├── init.sql/                        # Present in repo; docker-compose mounts this path
-├── readme.md
-├── .gitignore
+├── readme.md                        # Project documentation
+├── final_experiment_summary.md      # Summary of academic findings
 │
-├── client.py                        # Experiment 1: PostgreSQL BYTEA vs MongoDB GridFS
-├── analyze.py                       # Experiment 1 analysis
+├── main.py                          # Unified benchmark script (runs 3 phases)
+├── optimize.py                      # Optuna hyperparameter tuning script
+├── analyze.py                       # Statistical analysis (Wilcoxon, Mann-Whitney U, Cohen's d)
+├── plot_results.ipynb               # Jupyter Notebook for visualization
 │
-├── polyglot/
-│   ├── client.py                    # Experiment 2: PG metadata + Mongo binary vs pure Mongo
-│   └── analyze.py                   # Experiment 2 analysis
-│
-├── sql/
-│   ├── base.sql                     # PostgreSQL schema for Experiment 1
-│   └── polyglot_schema.sql          # PostgreSQL schema for Experiment 2
-│
-├── data/
+├── data/                            # Dataset folders (RAVDESS / Tsinghua FIB Lab)
 │   ├── audio/
-│   │   └── 300-400kb/               # Audio files used by both experiments
+│   │   ├── 300-400kb/
+│   │   └── 500-600kb/
 │   └── video/
-│       ├── 5-6mb/                   # Video files with RAVDESS-style metadata names
-│       └── 10-17mb/                 # Large video files without filename metadata
+│       ├── 5-6mb/
+│       └── 10-17mb/
 │
-└── results/
-    ├── raw_results.csv              # Experiment 1 raw measurements
-    ├── summary.csv                  # Experiment 1 summary
-    ├── polyglot_results.csv         # Experiment 2 raw measurements
-    └── polyglot_summary.csv         # Experiment 2 summary
+└── results/                         # Generated outputs
+    ├── benchmark_results.csv        # Raw metrics from main.py
+    ├── summary.csv                  # Statistical summary from analyze.py
+    └── plots/                       # High-resolution Box Plots
 ```
 
-Notes:
-- `__pycache__/` and `.DS_Store` are ignored by `.gitignore`.
-- `polyglot/__pycache__/` may appear locally after running Python.
-- `client.py` currently references `data/video/1-2mb` for `video_medium`, but
-  the current data tree only contains `data/video/5-6mb` and `data/video/10-17mb`.
-  Update `DATA_DIRS` in `client.py` or restore the `1-2mb` folder before running
-  Experiment 1.
+## 4. Environment Setup
 
----
-
-## Environment
-
-| Component  | Configuration |
-|------------|---------------|
-| PostgreSQL | Docker service `postgres-test`, image `postgres:16`, host port `5433` |
-| MongoDB | Docker service `mongo-test`, image `mongo:7`, host port `27018` |
-| Database | `mediadb` |
-| PostgreSQL user | `postgres` |
-| PostgreSQL password | `testpass` |
-| Python packages | `psycopg2-binary`, `pymongo`, `pandas` |
-
----
-
-## Setup
-
-### 1. Install Python Dependencies
-
+### Install Python Dependencies
 ```bash
-pip install psycopg2-binary pymongo pandas
+pip install psycopg2-binary pymongo pandas optuna
 ```
 
-### 2. Start Databases
-
+### Start Databases
 ```bash
 docker compose up -d
 ```
+- PostgreSQL is exposed on `localhost:5433`.
+- MongoDB is exposed on `localhost:27018`.
+- *Note: Schema creation is handled automatically by `main.py` at runtime. You do not need to manually load any SQL scripts.*
 
-PostgreSQL is exposed on `localhost:5433`.
-MongoDB is exposed on `localhost:27018`.
+## 5. Running the Pipeline
 
-### 3. Load PostgreSQL Schemas
+The entire experimental workflow is broken down into a clean, reproducible engineering pipeline:
 
-From the repository root:
-
+### Step 1: Hyperparameter Tuning
+Run Optuna trials to find the best database configurations. This modifies PostgreSQL configs via `ALTER SYSTEM` and generates `tuning_config.json`.
 ```bash
-docker exec -i experiment-postgres-test-1 psql -U postgres -d mediadb < sql/base.sql
-docker exec -i experiment-postgres-test-1 psql -U postgres -d mediadb < sql/polyglot_schema.sql
+python optimize.py
 ```
 
-Verify tables:
-
+### Step 2: Core Benchmark
+Run the unified benchmark script. It loads the `tuning_config.json`, cleans the storage, runs a warm-up phase, and executes the 3-phase benchmark (Write, Metadata Query, End-to-End Retrieval) across 10 randomized repetitions.
 ```bash
-docker exec -it experiment-postgres-test-1 psql -U postgres -d mediadb -c "\dt"
+python main.py
 ```
+Outputs are saved to `results/benchmark_results.csv`.
 
-Expected tables:
-
-```text
-media
-media_meta
-```
-
----
-
-## Running Experiments
-
-### Experiment 1: PostgreSQL BYTEA vs MongoDB GridFS
-
-From the repository root:
-
+### Step 3: Statistical Analysis
+Read the raw metrics to compute statistical tests (Wilcoxon signed-rank, Mann-Whitney U, Cohen's d).
 ```bash
-python client.py
 python analyze.py
 ```
+Exports `results/summary.csv` and `results/statistical_tests.csv`.
 
-This experiment measures:
-- write latency
-- read latency
-- checksum validation for fetched bytes
-- per-bucket latency and throughput summaries
+### Step 4: Visualization
+Open `plot_results.ipynb` in Jupyter/VSCode to visualize the raw data into academic, high-resolution Box Plots (saved in `results/plots/`).
 
-Before each run, `client.py` resets:
-- PostgreSQL table `media`
-- MongoDB database `mediadb` GridFS collections
-
-It also runs a warm-up phase before measured operations.
-
-### Experiment 2: Polyglot Persistence vs Pure MongoDB
-
-From the repository root:
-
-```bash
-cd polyglot
-python client.py
-python analyze.py
-```
-
-This experiment has three measured phases:
-
-| Phase | Meaning | Approaches compared |
-|-------|---------|---------------------|
-| `write` | Store metadata and/or binary | `polyglot` vs `pure_mongo` |
-| `query` | Metadata-only lookup | `polyglot_pg` vs `pure_mongo` |
-| `read` | Metadata lookup plus file fetch | `polyglot` vs `pure_mongo` |
-
-Before each run, `polyglot/client.py` resets:
-- PostgreSQL table `media_meta`
-- MongoDB database `mediadb_poly` GridFS collections
-
-`polyglot/analyze.py` checks that query/read comparisons touch the same number
-of files for both approaches. If `n_files` differs, analysis stops instead of
-producing an unfair paper table.
-
----
-
-## Dataset Folders
-
-| Script bucket | Current folder | Notes |
-|---------------|----------------|-------|
-| `audio_small` | `data/audio/300-400kb` | RAVDESS-style `.wav` files |
-| `video_medium` in `polyglot/client.py` | `data/video/5-6mb` | RAVDESS-style `.mp4` files |
-| `video_large` in `polyglot/client.py` | `data/video/10-17mb` | Large `.mp4` files without filename metadata |
-| `video_medium` in root `client.py` | `data/video/1-2mb` | Referenced by code, not present in current tree |
-| `video_large` in root `client.py` | `data/video/5-6mb` | RAVDESS-style `.mp4` files |
-
-Valid file extensions are `.wav` and `.mp4`.
-
----
-
-## RAVDESS Filename Convention
+## 6. Dataset and Filename Convention
 
 Files with RAVDESS-style metadata names use:
-
 ```text
 modality-channel-emotion-intensity-statement-repetition-actor.ext
 ```
+For files that do not match this convention (e.g., in `video_medium`), `main.py` assigns deterministic generated metadata on the fly.
 
-Example:
-
-```text
-03-01-03-02-01-01-07.wav
-│  │  │  │  │  │  └─ actor
-│  │  │  │  │  └──── repetition
-│  │  │  │  └─────── statement
-│  │  │  └────────── intensity
-│  │  └───────────── emotion
-│  └──────────────── channel
-└─────────────────── modality
-```
-
-For files that do not match this convention, `polyglot/client.py` only accepts
-them in the `video_large` bucket and assigns deterministic generated metadata.
-
----
-
-## Results
-
-Experiment 1 writes:
-
-```text
-results/raw_results.csv
-results/summary.csv
-```
-
-Experiment 2 writes:
-
-```text
-results/polyglot_results.csv
-results/polyglot_summary.csv
-```
-
-Current result files may be stale after code or dataset changes. Regenerate them
-after changing folder contents, schema, benchmark phases, or metadata handling.
-
----
-
-## Stop Containers
-
+## 7. Stop Containers
 ```bash
 docker compose down
 ```

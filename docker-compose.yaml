@@ -11,7 +11,6 @@ services:
     cpus: "2"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
 
   mongo-test:
     image: mongo:7
