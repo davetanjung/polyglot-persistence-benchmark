@@ -4,3 +4,5 @@ __pycache__/
 .graphify
 .DS_Store
 data/
+generate_data.py
+reduce_data.py

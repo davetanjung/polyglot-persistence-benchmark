@@ -19,6 +19,7 @@ import re
 import time
 import concurrent.futures
 from pathlib import Path
+from tqdm import tqdm
 
 import bson
 import psycopg2
@@ -332,7 +333,7 @@ def polyglot_e2e(pg, fs, actor: int, emotion: int) -> tuple[float, int, list]:
 def warmup(pg, fs, db, files: list[tuple[str, Path, dict]]):
     print(f"\n── Warm-up ({WARMUP_REPS} ops per bucket) ──")
     seen_buckets = set()
-    for bucket, filepath, meta in files:
+    for bucket, filepath, meta in tqdm(files, desc="Warm-up", leave=False):
         if bucket in seen_buckets:
             continue
         seen_buckets.add(bucket)
@@ -390,33 +391,36 @@ def run():
 
     # ── Phase 1: Writes
     print(f"\n── Phase 1: Writes ({len(files)} files x {REPS} reps) ──")
+    total_writes = REPS * len(files)
     with open(RESULTS_FILE, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["phase", "query_type", "actor", "emotion", "bucket",
                     "approach", "rep", "stored_name", "filesize_bytes",
                     "elapsed_seconds", "n_files", "checksum_ok"])
 
-        for rep in range(REPS):
-            for bucket, filepath, meta in files:
-                ext = filepath.suffix
-                stored_name = f"{filepath.stem}_r{rep:02d}{ext}"
-                filesize = filepath.stat().st_size
+        with tqdm(total=total_writes, desc="Phase 1: Writes") as pbar:
+            for rep in range(REPS):
+                for bucket, filepath, meta in files:
+                    ext = filepath.suffix
+                    stored_name = f"{filepath.stem}_r{rep:02d}{ext}"
+                    filesize = filepath.stat().st_size
 
-                approaches = list(approaches_list)
-                random.shuffle(approaches)
+                    approaches = list(approaches_list)
+                    random.shuffle(approaches)
 
-                for approach in approaches:
-                    if approach == "pg_bytea":
-                        elapsed = pg_bytea_write(pg, filepath, stored_name, bucket, meta, ext)
-                    elif approach == "mongo_gridfs":
-                        elapsed = mongo_gridfs_write(fs, filepath, stored_name, bucket, meta, ext)
-                    elif approach == "polyglot":
-                        elapsed = polyglot_write(pg, fs, filepath, stored_name, bucket, meta, ext)
+                    for approach in approaches:
+                        if approach == "pg_bytea":
+                            elapsed = pg_bytea_write(pg, filepath, stored_name, bucket, meta, ext)
+                        elif approach == "mongo_gridfs":
+                            elapsed = mongo_gridfs_write(fs, filepath, stored_name, bucket, meta, ext)
+                        elif approach == "polyglot":
+                            elapsed = polyglot_write(pg, fs, filepath, stored_name, bucket, meta, ext)
+                        
+                        w.writerow(["write", "write", None, None, bucket,
+                                    approach, rep, stored_name, filesize,
+                                    f"{elapsed:.6f}", 1, None])
                     
-                    w.writerow(["write", "write", None, None, bucket,
-                                approach, rep, stored_name, filesize,
-                                f"{elapsed:.6f}", 1, None])
-            print(f"  Rep {rep+1}/{REPS} done")
+                    pbar.update(1)
 
     # ── Prepare Queries
     cur = pg.cursor()
@@ -426,66 +430,72 @@ def run():
 
     # ── Phase 2: Metadata Queries
     print(f"\n── Phase 2: Metadata Queries ({len(query_pairs)} pairs x {REPS} reps) ──")
+    total_queries = REPS * len(query_pairs)
     with open(RESULTS_FILE, "a", newline="") as f:
         w = csv.writer(f)
-        for rep in range(REPS):
-            pairs_this_rep = list(query_pairs)
-            random.shuffle(pairs_this_rep)
+        with tqdm(total=total_queries, desc="Phase 2: Queries") as pbar:
+            for rep in range(REPS):
+                pairs_this_rep = list(query_pairs)
+                random.shuffle(pairs_this_rep)
 
-            for actor, emotion in pairs_this_rep:
-                approaches = list(approaches_list)
-                random.shuffle(approaches)
+                for actor, emotion in pairs_this_rep:
+                    approaches = list(approaches_list)
+                    random.shuffle(approaches)
 
-                for approach in approaches:
-                    if approach == "pg_bytea":
-                        t, n = pg_bytea_meta_query(pg, actor, emotion)
-                    elif approach == "mongo_gridfs":
-                        t, n = mongo_gridfs_meta_query(mongo_db, actor, emotion)
-                    elif approach == "polyglot":
-                        t, n = polyglot_meta_query(pg, actor, emotion)
+                    for approach in approaches:
+                        if approach == "pg_bytea":
+                            t, n = pg_bytea_meta_query(pg, actor, emotion)
+                        elif approach == "mongo_gridfs":
+                            t, n = mongo_gridfs_meta_query(mongo_db, actor, emotion)
+                        elif approach == "polyglot":
+                            t, n = polyglot_meta_query(pg, actor, emotion)
+                        
+                        w.writerow(["query", "metadata_only", actor, emotion, None,
+                                    approach, rep, None, None,
+                                    f"{t:.6f}", n, None])
                     
-                    w.writerow(["query", "metadata_only", actor, emotion, None,
-                                approach, rep, None, None,
-                                f"{t:.6f}", n, None])
-            print(f"  Query rep {rep+1}/{REPS} done")
+                    pbar.update(1)
 
     # ── Phase 3: E2E Retrieval
     checksum_mismatches = []
     print(f"\n── Phase 3: End-to-End Retrieval ({len(query_pairs)} pairs x {REPS} reps) ──")
+    total_reads = REPS * len(query_pairs)
     with open(RESULTS_FILE, "a", newline="") as f:
         w = csv.writer(f)
-        for rep in range(REPS):
-            pairs_this_rep = list(query_pairs)
-            random.shuffle(pairs_this_rep)
+        with tqdm(total=total_reads, desc="Phase 3: Reads") as pbar:
+            for rep in range(REPS):
+                pairs_this_rep = list(query_pairs)
+                random.shuffle(pairs_this_rep)
 
-            for actor, emotion in pairs_this_rep:
-                approaches = list(approaches_list)
-                random.shuffle(approaches)
-                
-                results = []
-                for approach in approaches:
-                    if approach == "pg_bytea":
-                        t, n, csums = pg_bytea_e2e(pg, actor, emotion)
-                    elif approach == "mongo_gridfs":
-                        t, n, csums = mongo_gridfs_e2e(fs, mongo_db, actor, emotion)
-                    elif approach == "polyglot":
-                        t, n, csums = polyglot_e2e(pg, fs, actor, emotion)
+                for actor, emotion in pairs_this_rep:
+                    approaches = list(approaches_list)
+                    random.shuffle(approaches)
+                    
+                    results = []
+                    for approach in approaches:
+                        if approach == "pg_bytea":
+                            t, n, csums = pg_bytea_e2e(pg, actor, emotion)
+                        elif approach == "mongo_gridfs":
+                            t, n, csums = mongo_gridfs_e2e(fs, mongo_db, actor, emotion)
+                        elif approach == "polyglot":
+                            t, n, csums = polyglot_e2e(pg, fs, actor, emotion)
 
-                    results.append((approach, t, n, csums))
+                        results.append((approach, t, n, csums))
 
-                # Verify checksums across the 3 approaches
-                c_map = {res[0]: sorted(res[3]) for res in results}
-                checksum_ok = (c_map["pg_bytea"] == c_map["mongo_gridfs"] == c_map["polyglot"])
-                
-                if not checksum_ok:
-                    checksum_mismatches.append((actor, emotion))
+                    # Verify checksums across the 3 approaches
+                    c_map = {res[0]: sorted(res[3]) for res in results}
+                    checksum_ok = (c_map["pg_bytea"] == c_map["mongo_gridfs"] == c_map["polyglot"])
+                    
+                    if not checksum_ok:
+                        checksum_mismatches.append((actor, emotion))
 
-                for res in results:
-                    approach, t, n, _ = res
-                    w.writerow(["read", "end_to_end", actor, emotion, None,
-                                approach, rep, None, None,
-                                f"{t:.6f}", n, checksum_ok])
-            print(f"  Read rep {rep+1}/{REPS} done")
+                    for res in results:
+                        approach, t, n, _ = res
+                        w.writerow(["read", "end_to_end", actor, emotion, None,
+                                    approach, rep, None, None,
+                                    f"{t:.6f}", n, checksum_ok])
+                    
+                    pbar.update(1)
             
     if checksum_mismatches:
         print(f"\n[WARNING] {len(checksum_mismatches)} checksum mismatches detected")

@@ -1,7 +1,7 @@
 {
-    "chunk_size_bytes": 261120,
-    "shared_buffers": "512MB",
-    "work_mem": "64MB",
+    "chunk_size_bytes": 524288,
+    "shared_buffers": "256MB",
+    "work_mem": "4MB",
     "maintenance_work_mem": "128MB",
-    "random_page_cost": "4.0"
+    "random_page_cost": "1.1"
 }
