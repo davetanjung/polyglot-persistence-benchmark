@@ -7,8 +7,8 @@ services:
       POSTGRES_USER: postgres
     ports:
       - "5433:5432"
-    mem_limit: 2g
-    cpus: "2"
+    mem_limit: ${DB_MEM:-2g}
+    cpus: "${DB_CPUS:-2}"
     volumes:
       - pgdata:/var/lib/postgresql/data
 
@@ -16,8 +16,8 @@ services:
     image: mongo:7
     ports:
       - "27018:27017"
-    mem_limit: 2g
-    cpus: "2"
+    mem_limit: ${DB_MEM:-2g}
+    cpus: "${DB_CPUS:-2}"
     volumes:
       - mongodata:/data/db
 

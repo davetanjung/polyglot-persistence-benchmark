@@ -1,16 +1,3 @@
-"""
-main.py — Unified Benchmark for Storage Strategies
-
-Benchmarks 3 approaches:
-  1. pg_bytea: PostgreSQL BYTEA with metadata columns in the same table.
-  2. mongo_gridfs: Pure MongoDB GridFS with embedded metadata fields.
-  3. polyglot: PostgreSQL for metadata, MongoDB GridFS for binary content.
-
-RAVDESS filename convention:
-  modality-channel-emotion-intensity-statement-repetition-actor.ext
-  e.g. 03-01-03-01-01-01-07.wav
-"""
-
 import csv
 import json
 import hashlib
@@ -27,8 +14,7 @@ import psycopg2.extras
 import pymongo
 import gridfs
 
-# ── Configuration ─────────────────────────────────────────────────────────────
-
+# configuration
 DATA_DIRS = {
     "audio_small":  Path("data/audio/300-400kb"),
     "audio_medium": Path("data/audio/500-600kb"),
@@ -41,15 +27,17 @@ VALID_EXTENSIONS = {".wav", ".mp4"}
 REPS             = 10
 WARMUP_REPS      = 5
 WARMUP_PAUSE_S   = 30
-RESULTS_FILE     = Path("results/benchmark_results.csv")
+import os
+RESULTS_FILE     = Path(os.environ.get("RESULTS_FILENAME", "results/benchmark_results.csv"))
 RESET_BEFORE_RUN = True
 
 PG_DSN    = "host=localhost port=5433 dbname=mediadb user=postgres password=testpass"
 MONGO_URI = "mongodb://localhost:27018/"
 
-GRIDFS_CHUNK_SIZE_BYTES = 261120
+GRIDFS_CHUNK_SIZE_BYTES = 261120 # safety net
 
 TUNING_CONFIG_FILE = Path("tuning_config.json")
+
 if TUNING_CONFIG_FILE.exists():
     try:
         with open(TUNING_CONFIG_FILE, "r") as f:
@@ -64,7 +52,7 @@ RAVDESS_KEYS = [
     "statement", "repetition", "actor",
 ]
 
-# ── Database Connection & Setup ───────────────────────────────────────────────
+#  Database Connection & Setup 
 
 def connect():
     pg = psycopg2.connect(PG_DSN, keepalives=1, keepalives_idle=30)
@@ -77,7 +65,7 @@ def connect():
 def setup_postgres_tables(pg):
     """Ensure the required tables exist in PostgreSQL with proper schema."""
     cur = pg.cursor()
-    # Strategy 1: pg_bytea table
+    # pg_bytea table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS media_bytea (
             id SERIAL PRIMARY KEY,
@@ -95,10 +83,10 @@ def setup_postgres_tables(pg):
             content BYTEA
         )
     """)
-    # Force STORAGE EXTERNAL to disable TOAST compression for binary data
+    # disable TOAST compression by forcing it to be stored externally
     cur.execute("ALTER TABLE media_bytea ALTER COLUMN content SET STORAGE EXTERNAL")
     
-    # Strategy 3: polyglot table
+    # polyglot table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS media_polyglot (
             id SERIAL PRIMARY KEY,
@@ -134,7 +122,7 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-# ── File & Metadata parsing ───────────────────────────────────────────────────
+# File & Metadata parsing
 
 RAVDESS_PATTERN = re.compile(
     r"^(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})\."
@@ -147,7 +135,7 @@ def parse_ravdess(filename: str):
     return {k: int(v) for k, v in zip(RAVDESS_KEYS, m.groups())}
 
 def generated_video_metadata(sequence: int) -> dict:
-    """Stable synthetic metadata for the large video bucket."""
+    # generate synthetic metadata for tsinghua video files
     return {
         "modality": 2,
         "channel": 1,
@@ -186,10 +174,19 @@ def collect_files(data_dirs: dict) -> list[tuple[str, Path, dict]]:
     return entries
 
 
-# ── Write operations ──────────────────────────────────────────────────────────
+# Write operations 
+
+def safe_read_bytes(filepath: Path, retries=5) -> bytes:
+    for i in range(retries):
+        try:
+            return filepath.read_bytes()
+        except OSError as e:
+            if i == retries - 1:
+                raise
+            time.sleep(2)
 
 def pg_bytea_write(pg, filepath: Path, stored_name: str, bucket: str, meta: dict, ext: str) -> float:
-    raw = filepath.read_bytes()
+    raw = safe_read_bytes(filepath)
     t0 = time.perf_counter()
     cur = pg.cursor()
     cur.execute("""
@@ -210,7 +207,7 @@ def pg_bytea_write(pg, filepath: Path, stored_name: str, bucket: str, meta: dict
     return t1 - t0
 
 def mongo_gridfs_write(fs, filepath: Path, stored_name: str, bucket: str, meta: dict, ext: str) -> float:
-    raw = filepath.read_bytes()
+    raw = safe_read_bytes(filepath)
     t0 = time.perf_counter()
     fs.put(raw, filename=stored_name, source_filename=filepath.name, 
            bucket=bucket, filetype=ext, chunk_size=GRIDFS_CHUNK_SIZE_BYTES, **meta)
@@ -218,41 +215,36 @@ def mongo_gridfs_write(fs, filepath: Path, stored_name: str, bucket: str, meta: 
     return t1 - t0
 
 def polyglot_write(pg, fs, filepath: Path, stored_name: str, bucket: str, meta: dict, ext: str) -> float:
-    raw = filepath.read_bytes()
+    raw = safe_read_bytes(filepath)
     file_id = bson.ObjectId()
     
-    def write_mongo():
-        fs.put(raw, _id=file_id, filename=stored_name, source_filename=filepath.name, 
-               bucket=bucket, filetype=ext, chunk_size=GRIDFS_CHUNK_SIZE_BYTES)
-               
-    def write_pg():
-        cur = pg.cursor()
-        cur.execute("""
-            INSERT INTO media_polyglot
-                (filename, bucket, modality, channel, emotion, intensity,
-                 statement, repetition, actor, filesize_bytes, filetype, mongo_file_id)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT (filename) DO NOTHING
-        """, (
-            stored_name, bucket,
-            meta["modality"], meta["channel"], meta["emotion"], meta["intensity"],
-            meta["statement"], meta["repetition"], meta["actor"],
-            len(raw), ext, str(file_id)
-        ))
-        pg.commit()
-        cur.close()
-        
     t0 = time.perf_counter()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        f1 = executor.submit(write_mongo)
-        f2 = executor.submit(write_pg)
-        f1.result()
-        f2.result()
+    # Write to Mongo
+    fs.put(raw, _id=file_id, filename=stored_name, source_filename=filepath.name, 
+           bucket=bucket, filetype=ext, chunk_size=GRIDFS_CHUNK_SIZE_BYTES)
+           
+    # Write to Postgres
+    cur = pg.cursor()
+    cur.execute("""
+        INSERT INTO media_polyglot
+            (filename, bucket, modality, channel, emotion, intensity,
+             statement, repetition, actor, filesize_bytes, filetype, mongo_file_id)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (filename) DO NOTHING
+    """, (
+        stored_name, bucket,
+        meta["modality"], meta["channel"], meta["emotion"], meta["intensity"],
+        meta["statement"], meta["repetition"], meta["actor"],
+        len(raw), ext, str(file_id)
+    ))
+    pg.commit()
+    cur.close()
+        
     t1 = time.perf_counter()
     return t1 - t0
 
 
-# ── Metadata Query operations ─────────────────────────────────────────────────
+# Metadata Query operations 
 
 def pg_bytea_meta_query(pg, actor: int, emotion: int) -> tuple[float, int]:
     cur = pg.cursor()
@@ -285,7 +277,7 @@ def polyglot_meta_query(pg, actor: int, emotion: int) -> tuple[float, int]:
     return t1 - t0, len(rows)
 
 
-# ── End-to-End Retrieval operations ───────────────────────────────────────────
+# End-to-End Retrieval operations 
 
 def pg_bytea_e2e(pg, actor: int, emotion: int) -> tuple[float, int, list]:
     cur = pg.cursor()
@@ -367,7 +359,7 @@ def warmup(pg, fs, db, files: list[tuple[str, Path, dict]]):
     time.sleep(WARMUP_PAUSE_S)
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# Main 
 
 def run():
     RESULTS_FILE.parent.mkdir(exist_ok=True)
