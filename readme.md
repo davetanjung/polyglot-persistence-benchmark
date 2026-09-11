@@ -11,6 +11,7 @@ The primary goal of this research is to empirically benchmark three different da
 ## 2. Optimizations Implemented
 - **Parallel Writes (Concurrency)**: The Polyglot strategy uses `concurrent.futures.ThreadPoolExecutor` to simultaneously write to MongoDB GridFS and PostgreSQL, eliminating the theoretical "double-write" penalty.
 - **Machine Learning Database Tuning (Optuna)**: Hyperparameters like MongoDB `chunk_size_bytes` and PostgreSQL memory settings (`shared_buffers`, `work_mem`) are optimized via Optuna to find the absolute best combination of memory and storage parameters before running the benchmark.
+- **Hardware Scalability Testing**: Automated testing across multiple Docker container resource limits (e.g., 4 CPU / 4GB RAM, 6 CPU / 4.5GB RAM) to observe how approaches scale.
 
 ## 3. Project Structure
 
@@ -18,32 +19,32 @@ The primary goal of this research is to empirically benchmark three different da
 experiment/
 ├── docker-compose.yaml              # PostgreSQL 16 and MongoDB 7 services
 ├── readme.md                        # Project documentation
-├── final_experiment_summary.md      # Summary of academic findings
 │
 ├── main.py                          # Unified benchmark script (runs 3 phases)
 ├── optimize.py                      # Optuna hyperparameter tuning script
 ├── analyze.py                       # Statistical analysis (Wilcoxon, Mann-Whitney U, Cohen's d)
+├── run_experiments.py               # Automated pipeline to run benchmarks across hardware limits
 ├── plot_results.ipynb               # Jupyter Notebook for visualization
+├── tuning_config.json               # Active hyperparameter configuration
 │
-├── data/                            # Dataset folders (RAVDESS / Tsinghua FIB Lab)
-│   ├── audio/
-│   │   ├── 300-400kb/
-│   │   └── 500-600kb/
-│   └── video/
-│       ├── 5-6mb/
-│       └── 10-17mb/
+├── results/                         # Generated outputs
+│   ├── benchmark_*cpu*.csv          # Raw metrics from main.py per hardware limit
+│   ├── summary.csv                  # Statistical summary from analyze.py
+│   ├── statistical_tests_*.csv      # Intra-DB and Inter-HW comparisons
+│   ├── tuning_*cpu*.json            # Saved tuning configurations per hardware limit
+│   └── plots/                       # High-resolution Box Plots
 │
-└── results/                         # Generated outputs
-    ├── benchmark_results.csv        # Raw metrics from main.py
-    ├── summary.csv                  # Statistical summary from analyze.py
-    └── plots/                       # High-resolution Box Plots
+├── gambar/                          # Image assets directory
+└── sql/                             # SQL related assets or backups
 ```
+
+*(Note: Data generation scripts, drafting documents, and datasets have been excluded from version control).*
 
 ## 4. Environment Setup
 
 ### Install Python Dependencies
 ```bash
-pip install psycopg2-binary pymongo pandas optuna
+pip install psycopg2-binary pymongo pandas numpy scipy optuna tqdm
 ```
 
 ### Start Databases
@@ -52,34 +53,43 @@ docker compose up -d
 ```
 - PostgreSQL is exposed on `localhost:5433`.
 - MongoDB is exposed on `localhost:27018`.
-- *Note: Schema creation is handled automatically by `main.py` at runtime. You do not need to manually load any SQL scripts.*
+- *Note: Schema creation is handled automatically by `main.py` at runtime.*
 
 ## 5. Running the Pipeline
 
-The entire experimental workflow is broken down into a clean, reproducible engineering pipeline:
+The entire experimental workflow is broken down into a reproducible engineering pipeline.
 
-### Step 1: Hyperparameter Tuning
-Run Optuna trials to find the best database configurations. This modifies PostgreSQL configs via `ALTER SYSTEM` and generates `tuning_config.json`.
+### Option A: Automated Multi-Hardware Benchmark (Recommended)
+This script loops through different CPU and Memory limits, automatically restarting the Docker containers, running the Optuna tuning, and then running the core benchmark.
+```bash
+python run_experiments.py
+```
+*Outputs are saved individually per hardware limit in `results/benchmark_*cpu*.csv` and `results/tuning_*cpu*.json`.*
+
+### Option B: Manual Execution
+If you prefer running a single step manually:
+
+**Step 1: Hyperparameter Tuning**
+Find the best database configurations for the current environment. Generates `tuning_config.json`.
 ```bash
 python optimize.py
 ```
 
-### Step 2: Core Benchmark
-Run the unified benchmark script. It loads the `tuning_config.json`, cleans the storage, runs a warm-up phase, and executes the 3-phase benchmark (Write, Metadata Query, End-to-End Retrieval) across 10 randomized repetitions.
+**Step 2: Core Benchmark**
+Executes the 3-phase benchmark (Write, Metadata Query, End-to-End Retrieval) across 10 randomized repetitions.
 ```bash
 python main.py
 ```
-Outputs are saved to `results/benchmark_results.csv`.
 
 ### Step 3: Statistical Analysis
-Read the raw metrics to compute statistical tests (Wilcoxon signed-rank, Mann-Whitney U, Cohen's d).
+Read the raw metrics from the `results/` folder to compute statistical tests (Wilcoxon signed-rank, Mann-Whitney U, Cohen's d). It analyzes both Intra-Hardware (comparing databases) and Inter-Hardware (scalability of a database).
 ```bash
 python analyze.py
 ```
-Exports `results/summary.csv` and `results/statistical_tests.csv`.
+*Exports `results/summary.csv`, `results/statistical_tests_intra_db.csv`, and `results/statistical_tests_inter_hw.csv`.*
 
 ### Step 4: Visualization
-Open `plot_results.ipynb` in Jupyter/VSCode to visualize the raw data into academic, high-resolution Box Plots (saved in `results/plots/`).
+Open `plot_results.ipynb` in Jupyter/VSCode to visualize the raw data into academic, high-resolution Box Plots.
 
 ## 6. Dataset and Filename Convention
 
@@ -91,5 +101,5 @@ For files that do not match this convention (e.g., in `video_medium`), `main.py`
 
 ## 7. Stop Containers
 ```bash
-docker compose down
+docker compose down -v
 ```

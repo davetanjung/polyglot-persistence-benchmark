@@ -6,3 +6,4 @@ __pycache__/
 data/
 generate_data.py
 reduce_data.py
+figure_jaise.ipynb
